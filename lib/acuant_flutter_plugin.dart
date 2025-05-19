@@ -71,4 +71,14 @@ class AcuantFlutterPlugin {
       return {'success': false, 'message': e.message};
     }
   }
+  
+  /// Get the SDK version information
+  static Future<Map<String, dynamic>> getSdkVersion() async {
+    try {
+      final result = await _channel.invokeMethod('getSdkVersion');
+      return Map<String, dynamic>.from(result);
+    } on PlatformException catch (e) {
+      return {'success': false, 'message': e.message};
+    }
+  }
 }

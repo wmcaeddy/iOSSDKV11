@@ -6,13 +6,13 @@ Pod::Spec.new do |s|
 A Flutter plugin that provides access to Acuant iOS SDK functionality.
                        DESC
   s.homepage         = 'http://example.com'
-  s.license          = { :file => '../LICENSE' }
+  s.license          = { :type => 'MIT', :text => 'Copyright (c) 2024' }
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'
-  s.dependency 'AcuantiOSSDKV11', '~> 11.6.5'
-  s.platform = :ios, '11.0'
+  
+  s.platform = :ios, '12.0'
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
