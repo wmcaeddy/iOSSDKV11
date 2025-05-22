@@ -1,142 +1,304 @@
 import Flutter
 import UIKit
 import AVFoundation
-// import AcuantCommon
-// import AcuantDocumentProcessing
-// import AcuantFaceMatch
-// import AcuantImagePreparation
-// import AcuantCamera
-// import AcuantFaceCapture
 
-// Local implementation of AcuantCommon classes
-class AcuantCredentials {
-  let username: String
-  let password: String
-  let subscription: String
+public class SwiftAcuantFlutterPlugin: NSObject, FlutterPlugin {
+  private var pendingResult: FlutterResult?
   
-  init(username: String, password: String, subscription: String) {
-    self.username = username
-    self.password = password
-    self.subscription = subscription
+  public static func register(with registrar: FlutterPluginRegistrar) {
+    let channel = FlutterMethodChannel(name: "acuant_flutter_plugin", binaryMessenger: registrar.messenger())
+    let instance = SwiftAcuantFlutterPlugin()
+    registrar.addMethodCallDelegate(instance, channel: channel)
   }
-}
 
-class AcuantEndpoints {
-  var frmEndpoint: String = "https://frm.acuant.net"
-  var passiveLivenessEndpoint: String = "https://us.passlive.acuant.net"
-  var medEndpoint: String = "https://medicscan.acuant.net"
-  var assureidEndpoint: String = "https://services.assureid.net"
-  var acasEndpoint: String = "https://acas.acuant.net"
-  var ozoneEndpoint: String = "https://ozone.acuant.net"
-}
-
-class AcuantCommon {
-  static let version = "11.6.5"
+  public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "initialize":
+        initialize(result: result)
+    case "captureFrontDocument":
+        pendingResult = result
+        captureImage(isBack: false, isFace: false)
+    case "captureBackDocument":
+        pendingResult = result
+        captureImage(isBack: true, isFace: false)
+    case "captureFace":
+        pendingResult = result
+        captureImage(isBack: false, isFace: true)
+    case "processDocument":
+        if let args = call.arguments as? [String: Any],
+           let frontImagePath = args["frontImagePath"] as? String,
+           let backImagePath = args["backImagePath"] as? String {
+            processDocument(frontImagePath: frontImagePath, backImagePath: backImagePath)
+        } else {
+            result(FlutterError(code: "INVALID_ARGUMENTS",
+                              message: "Invalid arguments for processDocument",
+                              details: nil))
+        }
+    case "getSdkVersion":
+        getSdkVersion(result: result)
+    case "matchFace":
+        if let args = call.arguments as? [String: Any],
+           let faceImagePath = args["faceImagePath"] as? String,
+           let documentImagePath = args["documentImagePath"] as? String {
+            matchFace(faceImagePath: faceImagePath, documentImagePath: documentImagePath)
+        } else {
+            result(FlutterError(code: "INVALID_ARGUMENTS",
+                              message: "Invalid arguments for matchFace",
+                              details: nil))
+        }
+    default:
+        result(FlutterMethodNotImplemented)
+    }
+  }
   
-  static func initialize(credentials: AcuantCredentials, endpoints: [String: String], completion: @escaping (Bool, Error?) -> Void) {
+  // MARK: - Implementation Methods
+  
+  private func initialize(result: @escaping FlutterResult) {
     // Simulate successful initialization
-    completion(true, nil)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+      result([
+        "success": true,
+        "message": "SDK initialized successfully"
+      ])
+    }
   }
-}
-
-// Camera controller for document and face capture
-class CameraController: NSObject, AVCapturePhotoCaptureDelegate {
-  private var captureSession: AVCaptureSession?
-  private var currentCamera: AVCaptureDevice?
-  private var photoOutput: AVCapturePhotoOutput?
-  private var previewLayer: AVCaptureVideoPreviewLayer?
-  private var completionHandler: ((Result<UIImage, Error>) -> Void)?
-  private var cameraView: UIView?
-  private var overlayView: UIView?
-  private var captureButton: UIButton?
-  private var cameraVC: UIViewController?
-  private var captureCompletion: ((Result<UIImage, Error>) -> Void)?
   
-  func setupCamera(on view: UIView, completion: @escaping (Bool) -> Void) {
-    cameraView = view
+  private func captureImage(isBack: Bool, isFace: Bool) {
+    let cameraPosition: AVCaptureDevice.Position = isFace ? .front : .back
     
-    // Initialize capture session
-    captureSession = AVCaptureSession()
-    captureSession?.beginConfiguration()
-    
-    // Set session preset
-    if captureSession?.canSetSessionPreset(.photo) == true {
-      captureSession?.sessionPreset = .photo
-    } else {
-      captureSession?.sessionPreset = .high
+    // Create and present the camera view controller
+    let cameraVC = SimpleCameraViewController()
+    cameraVC.cameraPosition = cameraPosition
+    cameraVC.isDocumentCapture = !isFace
+    cameraVC.completionHandler = { [weak self] result in
+      switch result {
+      case .success(let image):
+        // Save image to temporary directory
+        if let imagePath = self?.saveImageToTemporaryDirectory(image) {
+          self?.pendingResult?([
+            "success": true,
+            "imagePath": imagePath
+          ])
+        } else {
+          self?.pendingResult?([
+            "success": false,
+            "message": "Failed to save captured image"
+          ])
+        }
+      case .failure(let error):
+        self?.pendingResult?([
+          "success": false,
+          "message": error.localizedDescription
+        ])
+      }
     }
     
-    // Get camera device
-    guard let backCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-      print("Failed to get back camera")
-      completion(false)
+    // Present the camera view controller
+    if let topVC = UIApplication.shared.keyWindow?.rootViewController {
+      var presentingVC = topVC
+      while let presented = presentingVC.presentedViewController {
+        presentingVC = presented
+      }
+      
+      presentingVC.present(cameraVC, animated: true)
+    } else {
+      pendingResult?([
+        "success": false,
+        "message": "Could not present camera"
+      ])
+    }
+  }
+  
+  private func processDocument(frontImagePath: String, backImagePath: String) {
+    // Create mock document data
+    let mockFields: [String: String] = [
+      "firstName": "John",
+      "lastName": "Doe",
+      "dateOfBirth": "1980-01-01",
+      "documentNumber": "X123456789",
+      "expirationDate": "2025-01-01",
+      "issuingCountry": "USA",
+      "issuingState": "CA",
+      "documentType": "Driver's License"
+    ]
+    
+    // Simulate processing delay
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+      self?.pendingResult?([
+        "success": true,
+        "fields": mockFields,
+        "authenticationResult": [
+          "result": "Passed",
+          "score": 95
+        ]
+      ])
+    }
+  }
+  
+  private func getSdkVersion(result: @escaping FlutterResult) {
+    result([
+      "success": true,
+      "sdkVersion": "11.0.0"
+    ])
+  }
+
+  private func matchFace(faceImagePath: String, documentImagePath: String) {
+    // Simulate face matching delay
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+      self?.pendingResult?([
+        "success": true,
+        "score": 90,
+        "isMatch": true
+      ])
+    }
+  }
+  
+  private func saveImageToTemporaryDirectory(_ image: UIImage) -> String? {
+    let tempDir = NSTemporaryDirectory()
+    let fileName = UUID().uuidString + ".jpg"
+    let filePath = (tempDir as NSString).appendingPathComponent(fileName)
+    
+    if let imageData = image.jpegData(compressionQuality: 0.8) {
+      do {
+        try imageData.write(to: URL(fileURLWithPath: filePath))
+        return filePath
+      } catch {
+        print("Error saving image: \(error)")
+        return nil
+      }
+    }
+    return nil
+  }
+}
+
+// MARK: - Simple Camera View Controller
+class SimpleCameraViewController: UIViewController {
+  private var captureSession: AVCaptureSession!
+  private var previewLayer: AVCaptureVideoPreviewLayer!
+  private var photoOutput: AVCapturePhotoOutput!
+  private var overlayView: UIView!
+  
+  var cameraPosition: AVCaptureDevice.Position = .back
+  var isDocumentCapture: Bool = true
+  var completionHandler: ((Result<UIImage, Error>) -> Void)?
+  
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    
+    // Set up UI
+    view.backgroundColor = .black
+    
+    // Set up capture session
+    setupCaptureSession()
+    
+    // Set up UI elements
+    setupUI()
+  }
+  
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    
+    // Start the session on a background thread
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      self?.captureSession.startRunning()
+    }
+  }
+  
+  override func viewWillDisappear(_ animated: Bool) {
+    super.viewWillDisappear(animated)
+    
+    // Stop the session
+    captureSession.stopRunning()
+  }
+  
+  private func setupCaptureSession() {
+    // Initialize capture session
+    captureSession = AVCaptureSession()
+    
+    // Begin configuration
+    captureSession.beginConfiguration()
+    
+    // Set session preset
+    if captureSession.canSetSessionPreset(.photo) {
+      captureSession.sessionPreset = .photo
+    }
+    
+    // Setup camera input
+    guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: cameraPosition),
+          let videoDeviceInput = try? AVCaptureDeviceInput(device: videoDevice),
+          captureSession.canAddInput(videoDeviceInput) else {
+      captureSession.commitConfiguration()
+      completionHandler?(.failure(NSError(domain: "SimpleCameraViewController", code: 101, userInfo: [NSLocalizedDescriptionKey: "Failed to set up camera input"])))
       return
     }
     
-    currentCamera = backCamera
+    captureSession.addInput(videoDeviceInput)
     
-    do {
-      // Create device input
-      let input = try AVCaptureDeviceInput(device: backCamera)
-      
-      // Create photo output
-      photoOutput = AVCapturePhotoOutput()
-      photoOutput?.isHighResolutionCaptureEnabled = true
-      
-      if captureSession?.canAddInput(input) == true,
-         captureSession?.canAddOutput(photoOutput!) == true {
-        
-        captureSession?.addInput(input)
-        captureSession?.addOutput(photoOutput!)
-        
-        captureSession?.commitConfiguration()
-        
-        // Setup preview layer
-        setupPreviewLayer(on: view)
-        
-        // Setup overlay
-        setupOverlay(on: view)
-        
-        completion(true)
-      } else {
-        print("Failed to add input/output to session")
-        completion(false)
-      }
-    } catch {
-      print("Error setting up camera: \(error.localizedDescription)")
-      completion(false)
-    }
-  }
-  
-  private func setupPreviewLayer(on view: UIView) {
-    // Create and configure preview layer
-    previewLayer = AVCaptureVideoPreviewLayer(session: captureSession!)
-    previewLayer?.videoGravity = .resizeAspectFill
-    previewLayer?.frame = view.layer.bounds
-    
-    // Add preview layer to view
-    if let previewLayer = previewLayer {
-      view.layer.insertSublayer(previewLayer, at: 0)
+    // Setup photo output
+    photoOutput = AVCapturePhotoOutput()
+    guard captureSession.canAddOutput(photoOutput) else {
+      captureSession.commitConfiguration()
+      completionHandler?(.failure(NSError(domain: "SimpleCameraViewController", code: 102, userInfo: [NSLocalizedDescriptionKey: "Failed to set up photo output"])))
+      return
     }
     
-    // Add document frame overlay
-    addDocumentFrameOverlay(to: view)
+    captureSession.addOutput(photoOutput)
+    captureSession.commitConfiguration()
+    
+    // Setup preview layer
+    previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+    previewLayer.videoGravity = .resizeAspectFill
+    previewLayer.frame = view.bounds
+    view.layer.addSublayer(previewLayer)
   }
   
-  private func addDocumentFrameOverlay(to view: UIView) {
-    // Create overlay view
-    let overlayView = UIView(frame: view.bounds)
-    overlayView.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-    overlayView.translatesAutoresizingMaskIntoConstraints = false
+  private func setupUI() {
+    // Add overlay view
+    overlayView = UIView(frame: view.bounds)
+    overlayView.backgroundColor = UIColor.clear
     view.addSubview(overlayView)
     
+    // Add frame guide
+    if isDocumentCapture {
+      addDocumentFrameGuide()
+    } else {
+      addFaceFrameGuide()
+    }
+    
+    // Add capture button
+    let captureButton = UIButton(type: .system)
+    captureButton.translatesAutoresizingMaskIntoConstraints = false
+    captureButton.backgroundColor = .white
+    captureButton.layer.cornerRadius = 35
+    captureButton.layer.borderWidth = 5
+    captureButton.layer.borderColor = UIColor.lightGray.cgColor
+    captureButton.addTarget(self, action: #selector(capturePhoto), for: .touchUpInside)
+    view.addSubview(captureButton)
+    
     NSLayoutConstraint.activate([
-      overlayView.topAnchor.constraint(equalTo: view.topAnchor),
-      overlayView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-      overlayView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      overlayView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+      captureButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+      captureButton.widthAnchor.constraint(equalToConstant: 70),
+      captureButton.heightAnchor.constraint(equalToConstant: 70)
     ])
     
+    // Add cancel button
+    let cancelButton = UIButton(type: .system)
+    cancelButton.translatesAutoresizingMaskIntoConstraints = false
+    cancelButton.setTitle("Cancel", for: .normal)
+    cancelButton.setTitleColor(.white, for: .normal)
+    cancelButton.addTarget(self, action: #selector(cancelCapture), for: .touchUpInside)
+    view.addSubview(cancelButton)
+    
+    NSLayoutConstraint.activate([
+      cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+      cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+      cancelButton.widthAnchor.constraint(equalToConstant: 80),
+      cancelButton.heightAnchor.constraint(equalToConstant: 44)
+    ])
+  }
+  
+  private func addDocumentFrameGuide() {
     // Create document frame cutout
     let documentWidth = view.bounds.width * 0.8
     let documentHeight = documentWidth * 0.63 // ID card aspect ratio
@@ -145,12 +307,14 @@ class CameraController: NSObject, AVCapturePhotoCaptureDelegate {
     
     let documentRect = CGRect(x: documentX, y: documentY, width: documentWidth, height: documentHeight)
     
-    // Create mask layer
-    let maskLayer = CAShapeLayer()
-    let path = UIBezierPath(rect: view.bounds)
-    path.append(UIBezierPath(roundedRect: documentRect, cornerRadius: 10).reversing())
-    maskLayer.path = path.cgPath
-    overlayView.layer.mask = maskLayer
+    // Add semi-transparent overlay with cutout
+    let overlayPath = UIBezierPath(rect: view.bounds)
+    overlayPath.append(UIBezierPath(roundedRect: documentRect, cornerRadius: 10).reversing())
+    
+    let overlayLayer = CAShapeLayer()
+    overlayLayer.path = overlayPath.cgPath
+    overlayLayer.fillColor = UIColor.black.withAlphaComponent(0.5).cgColor
+    overlayView.layer.addSublayer(overlayLayer)
     
     // Add border around document frame
     let borderLayer = CAShapeLayer()
@@ -176,721 +340,76 @@ class CameraController: NSObject, AVCapturePhotoCaptureDelegate {
     ])
   }
   
-  private func setupOverlay(on view: UIView) {
-    // Create overlay for document capture guidance
-    overlayView = UIView(frame: view.bounds)
-    overlayView?.backgroundColor = UIColor.clear
+  private func addFaceFrameGuide() {
+    // Create face oval cutout
+    let faceWidth = view.bounds.width * 0.7
+    let faceHeight = faceWidth * 1.3 // Oval face aspect ratio
+    let faceX = (view.bounds.width - faceWidth) / 2
+    let faceY = (view.bounds.height - faceHeight) / 2
     
-    // Create a transparent rectangle in the middle
+    let faceRect = CGRect(x: faceX, y: faceY, width: faceWidth, height: faceHeight)
+    
+    // Add semi-transparent overlay with cutout
     let overlayPath = UIBezierPath(rect: view.bounds)
-    let width = view.bounds.width * 0.9
-    let height = width * 0.63 // ID card aspect ratio
-    let x = (view.bounds.width - width) / 2
-    let y = (view.bounds.height - height) / 2
-    let transparentPath = UIBezierPath(rect: CGRect(x: x, y: y, width: width, height: height))
-    overlayPath.append(transparentPath)
-    overlayPath.usesEvenOddFillRule = true
+    overlayPath.append(UIBezierPath(ovalIn: faceRect).reversing())
     
-    let fillLayer = CAShapeLayer()
-    fillLayer.path = overlayPath.cgPath
-    fillLayer.fillRule = .evenOdd
-    fillLayer.fillColor = UIColor(white: 0, alpha: 0.5).cgColor
-    overlayView?.layer.addSublayer(fillLayer)
+    let overlayLayer = CAShapeLayer()
+    overlayLayer.path = overlayPath.cgPath
+    overlayLayer.fillColor = UIColor.black.withAlphaComponent(0.5).cgColor
+    overlayView.layer.addSublayer(overlayLayer)
     
-    // Add border around the transparent rectangle
+    // Add border around face frame
     let borderLayer = CAShapeLayer()
-    borderLayer.path = transparentPath.cgPath
+    borderLayer.path = UIBezierPath(ovalIn: faceRect).cgPath
     borderLayer.strokeColor = UIColor.white.cgColor
     borderLayer.fillColor = UIColor.clear.cgColor
-    borderLayer.lineWidth = 2.0
-    overlayView?.layer.addSublayer(borderLayer)
+    borderLayer.lineWidth = 3
+    overlayView.layer.addSublayer(borderLayer)
     
     // Add instruction label
     let instructionLabel = UILabel()
-    instructionLabel.text = "Position document within the frame"
+    instructionLabel.text = "Position your face within the oval"
     instructionLabel.textColor = .white
     instructionLabel.textAlignment = .center
-    instructionLabel.frame = CGRect(x: 0, y: y + height + 20, width: view.bounds.width, height: 30)
-    overlayView?.addSubview(instructionLabel)
+    instructionLabel.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(instructionLabel)
     
-    // Add capture button
-    captureButton = UIButton(type: .system)
-    captureButton?.setTitle("Capture", for: .normal)
-    captureButton?.setTitleColor(.white, for: .normal)
-    captureButton?.backgroundColor = UIColor(red: 0, green: 0.5, blue: 1.0, alpha: 1.0)
-    captureButton?.layer.cornerRadius = 25
-    captureButton?.frame = CGRect(x: (view.bounds.width - 150) / 2, y: view.bounds.height - 100, width: 150, height: 50)
-    captureButton?.addTarget(self, action: #selector(capturePhoto), for: .touchUpInside)
-    
-    overlayView?.addSubview(captureButton!)
-    view.addSubview(overlayView!)
+    NSLayoutConstraint.activate([
+      instructionLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -100),
+      instructionLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      instructionLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 20),
+      instructionLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20)
+    ])
   }
   
-  func setupFaceCapture(on view: UIView) {
-    // Modify overlay for face capture
-    if let instructionLabel = overlayView?.subviews.first(where: { $0 is UILabel }) as? UILabel {
-      instructionLabel.text = "Position face within the frame"
-    }
-    
-    // Create circular mask for face
-    if let fillLayer = overlayView?.layer.sublayers?.first as? CAShapeLayer {
-      let overlayPath = UIBezierPath(rect: view.bounds)
-      let diameter = view.bounds.width * 0.7
-      let x = (view.bounds.width - diameter) / 2
-      let y = (view.bounds.height - diameter) / 2
-      let transparentPath = UIBezierPath(ovalIn: CGRect(x: x, y: y, width: diameter, height: diameter))
-      overlayPath.append(transparentPath)
-      overlayPath.usesEvenOddFillRule = true
-      
-      fillLayer.path = overlayPath.cgPath
-    }
-    
-    // Update border to circular
-    if let borderLayer = overlayView?.layer.sublayers?[1] as? CAShapeLayer {
-      let diameter = view.bounds.width * 0.7
-      let x = (view.bounds.width - diameter) / 2
-      let y = (view.bounds.height - diameter) / 2
-      let transparentPath = UIBezierPath(ovalIn: CGRect(x: x, y: y, width: diameter, height: diameter))
-      
-      borderLayer.path = transparentPath.cgPath
-    }
-  }
-  
-  private func startSession() {
-    if let captureSession = captureSession, !captureSession.isRunning {
-      DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-        self?.captureSession?.startRunning()
-      }
-    }
-  }
-  
-  private func stopSession() {
-    if let captureSession = captureSession, captureSession.isRunning {
-      captureSession.stopRunning()
-    }
-  }
-  
-  @objc func capturePhoto() {
-    guard let photoOutput = photoOutput else {
-      completionHandler?(.failure(NSError(domain: "CameraController", code: 104, userInfo: [NSLocalizedDescriptionKey: "Photo output not available"])))
-      return
-    }
-    
+  @objc private func capturePhoto() {
     let settings = AVCapturePhotoSettings()
-    settings.flashMode = .auto
-    
     photoOutput.capturePhoto(with: settings, delegate: self)
   }
   
-  // MARK: - AVCapturePhotoCaptureDelegate
+  @objc private func cancelCapture() {
+    completionHandler?(.failure(NSError(domain: "SimpleCameraViewController", code: 103, userInfo: [NSLocalizedDescriptionKey: "Capture cancelled"])))
+    dismiss(animated: true)
+  }
+}
+
+// MARK: - AVCapturePhotoCaptureDelegate
+extension SimpleCameraViewController: AVCapturePhotoCaptureDelegate {
   func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
     if let error = error {
-      captureCompletion?(.failure(error))
+      completionHandler?(.failure(error))
+      dismiss(animated: true)
       return
     }
     
     guard let imageData = photo.fileDataRepresentation(),
           let image = UIImage(data: imageData) else {
-      captureCompletion?(.failure(NSError(domain: "CameraController", code: 105, userInfo: [NSLocalizedDescriptionKey: "Failed to process captured image"])))
+      completionHandler?(.failure(NSError(domain: "SimpleCameraViewController", code: 104, userInfo: [NSLocalizedDescriptionKey: "Failed to process captured image"])))
+      dismiss(animated: true)
       return
     }
     
-    // Stop the session and dismiss the camera view controller
-    stopSession()
-    cameraVC?.dismiss(animated: true) { [weak self] in
-      self?.captureCompletion?(.success(image))
-    }
-  }
-  
-  func captureImage(completion: @escaping (Result<UIImage, Error>) -> Void) {
-    checkCameraPermission { [weak self] granted in
-      guard let self = self else { return }
-      
-      if granted {
-        self.captureCompletion = completion
-        self.presentCameraViewController(completion: completion)
-      } else {
-        completion(.failure(NSError(domain: "CameraController", code: 101, userInfo: [NSLocalizedDescriptionKey: "Camera permission denied"])))
-      }
-    }
-  }
-  
-  private func getTopViewController() -> UIViewController? {
-    // Get key window for iOS 13+
-    var keyWindow: UIWindow?
-    
-    if #available(iOS 13.0, *) {
-      keyWindow = UIApplication.shared.windows.first(where: { $0.isKeyWindow })
-    } else {
-      keyWindow = UIApplication.shared.keyWindow
-    }
-    
-    // Get the root view controller
-    guard let rootViewController = keyWindow?.rootViewController else {
-      return nil
-    }
-    
-    // Find the top-most presented view controller
-    var topController = rootViewController
-    while let presentedController = topController.presentedViewController {
-      topController = presentedController
-    }
-    
-    return topController
-  }
-  
-  private func checkCameraPermission(completion: @escaping (Bool) -> Void) {
-    switch AVCaptureDevice.authorizationStatus(for: .video) {
-    case .authorized:
-      completion(true)
-    case .notDetermined:
-      AVCaptureDevice.requestAccess(for: .video) { granted in
-        DispatchQueue.main.async {
-          completion(granted)
-        }
-      }
-    case .denied, .restricted:
-      completion(false)
-      
-      // Show alert to direct user to settings
-      DispatchQueue.main.async { [weak self] in
-        if let topVC = self?.getTopViewController() {
-          let alert = UIAlertController(
-            title: "Camera Access Required",
-            message: "Please allow camera access in Settings to capture documents and faces.",
-            preferredStyle: .alert
-          )
-          
-          alert.addAction(UIAlertAction(title: "Settings", style: .default) { _ in
-            if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
-              UIApplication.shared.open(settingsURL)
-            }
-          })
-          
-          alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-          
-          topVC.present(alert, animated: true)
-        }
-      }
-    @unknown default:
-      completion(false)
-    }
-  }
-  
-  private func presentCameraViewController(completion: @escaping (Result<UIImage, Error>) -> Void) {
-    // Create and configure camera view controller
-    cameraVC = UIViewController()
-    guard let cameraVC = cameraVC else { return }
-    
-    cameraVC.modalPresentationStyle = .fullScreen
-    cameraVC.view.backgroundColor = .black
-    
-    // Create camera view
-    let cameraView = UIView()
-    cameraView.translatesAutoresizingMaskIntoConstraints = false
-    cameraVC.view.addSubview(cameraView)
-    
-    NSLayoutConstraint.activate([
-      cameraView.topAnchor.constraint(equalTo: cameraVC.view.topAnchor),
-      cameraView.bottomAnchor.constraint(equalTo: cameraVC.view.bottomAnchor),
-      cameraView.leadingAnchor.constraint(equalTo: cameraVC.view.leadingAnchor),
-      cameraView.trailingAnchor.constraint(equalTo: cameraVC.view.trailingAnchor)
-    ])
-    
-    // Add close button
-    let closeButton = UIButton(type: .system)
-    closeButton.setTitle("Cancel", for: .normal)
-    closeButton.setTitleColor(.white, for: .normal)
-    closeButton.translatesAutoresizingMaskIntoConstraints = false
-    cameraVC.view.addSubview(closeButton)
-    
-    NSLayoutConstraint.activate([
-      closeButton.topAnchor.constraint(equalTo: cameraVC.view.safeAreaLayoutGuide.topAnchor, constant: 16),
-      closeButton.leadingAnchor.constraint(equalTo: cameraVC.view.leadingAnchor, constant: 16),
-      closeButton.widthAnchor.constraint(equalToConstant: 80),
-      closeButton.heightAnchor.constraint(equalToConstant: 44)
-    ])
-    
-    closeButton.addTarget(self, action: #selector(dismissCamera), for: .touchUpInside)
-    
-    // Find the top view controller to present from
-    if let topVC = getTopViewController() {
-      // Present camera view controller
-      topVC.present(cameraVC, animated: true) { [weak self] in
-        // Setup camera after presentation
-        self?.setupCamera(on: cameraView) { success in
-          if success {
-            // Start camera session after setup
-            self?.startSession()
-          } else {
-            // Handle setup failure
-            DispatchQueue.main.async {
-              completion(.failure(NSError(domain: "CameraController", code: 102, userInfo: [NSLocalizedDescriptionKey: "Failed to setup camera"])))
-              cameraVC.dismiss(animated: true)
-            }
-          }
-        }
-      }
-    } else {
-      completion(.failure(NSError(domain: "CameraController", code: 105, userInfo: [NSLocalizedDescriptionKey: "Could not find view controller to present from"])))
-    }
-  }
-  
-  @objc func dismissCamera() {
-    stopSession()
-    cameraVC?.dismiss(animated: true)
-  }
-  
-  // Add a capture button to the camera view
-  private func addCaptureButton(to view: UIView) {
-    let captureButton = UIButton(type: .system)
-    captureButton.translatesAutoresizingMaskIntoConstraints = false
-    captureButton.backgroundColor = UIColor.white
-    captureButton.layer.cornerRadius = 35
-    captureButton.layer.borderWidth = 5
-    captureButton.layer.borderColor = UIColor.lightGray.cgColor
-    
-    view.addSubview(captureButton)
-    
-    NSLayoutConstraint.activate([
-      captureButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-      captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
-      captureButton.widthAnchor.constraint(equalToConstant: 70),
-      captureButton.heightAnchor.constraint(equalToConstant: 70)
-    ])
-    
-    captureButton.addTarget(self, action: #selector(captureButtonTapped), for: .touchUpInside)
-  }
-  
-  @objc private func captureButtonTapped() {
-    takePicture()
-  }
-  
-  private func takePicture() {
-    guard let captureSession = captureSession, captureSession.isRunning else {
-      captureCompletion?(.failure(NSError(domain: "CameraController", code: 103, userInfo: [NSLocalizedDescriptionKey: "Camera session not running"])))
-      return
-    }
-    
-    guard let photoOutput = photoOutput else {
-      captureCompletion?(.failure(NSError(domain: "CameraController", code: 104, userInfo: [NSLocalizedDescriptionKey: "Photo output not available"])))
-      return
-    }
-    
-    let settings = AVCapturePhotoSettings()
-    photoOutput.capturePhoto(with: settings, delegate: self)
-  }
-}
-
-// Local implementation of AcuantCamera classes
-class DocumentCaptureResult {
-  let image: UIImage
-  
-  init(image: UIImage) {
-    self.image = image
-  }
-}
-
-class DocumentCaptureController {
-  private let cameraController = CameraController()
-  
-  func captureFrontDocument(completion: @escaping (Result<UIImage, Error>) -> Void) {
-    cameraController.captureImage(completion: completion)
-  }
-  
-  func captureBackDocument(completion: @escaping (Result<UIImage, Error>) -> Void) {
-    cameraController.captureImage(completion: completion)
-  }
-}
-
-// Local implementation of AcuantFaceCapture classes
-class AcuantFaceCaptureController {
-  private let cameraController = CameraController()
-  
-  func captureFace(completion: @escaping (Result<UIImage, Error>) -> Void) {
-    cameraController.captureImage { result in
-      switch result {
-      case .success(let image):
-        // Process the image for face capture
-        completion(.success(image))
-      case .failure(let error):
-        completion(.failure(error))
-      }
-    }
-  }
-}
-
-// Local implementation of AcuantDocumentProcessing classes
-class DocumentData {
-  let fields: [String: String]
-  let authenticationResult: AuthenticationResult
-  
-  init(fields: [String: String], authenticationResult: AuthenticationResult) {
-    self.fields = fields
-    self.authenticationResult = authenticationResult
-  }
-}
-
-class AuthenticationResult {
-  let result: Int
-  let score: Int
-  
-  init(result: Int, score: Int) {
-    self.result = result
-    self.score = score
-  }
-}
-
-class AcuantDocumentProcessingController {
-  func processDocument(frontImage: UIImage, backImage: UIImage, completion: @escaping (Result<DocumentData, Error>) -> Void) {
-    // Simulate document processing with OCR
-    DispatchQueue.global(qos: .userInitiated).async {
-      // Simulate processing delay
-      Thread.sleep(forTimeInterval: 2.0)
-      
-      // Create mock document data
-      let fields = [
-        "firstName": "John",
-        "lastName": "Doe",
-        "dateOfBirth": "1980-01-01",
-        "documentNumber": "123456789",
-        "expirationDate": "2030-01-01",
-        "issuingCountry": "USA",
-        "documentType": "Driver's License"
-      ]
-      
-      let authResult = AuthenticationResult(result: 1, score: 85)
-      let documentData = DocumentData(fields: fields, authenticationResult: authResult)
-      
-      DispatchQueue.main.async {
-        completion(.success(documentData))
-      }
-    }
-  }
-}
-
-// Local implementation of AcuantFaceMatch classes
-class FaceMatchData {
-  let score: Float
-  let isMatch: Bool
-  
-  init(score: Float, isMatch: Bool) {
-    self.score = score
-    self.isMatch = isMatch
-  }
-}
-
-class AcuantFaceMatchController {
-  func matchFaces(faceImage: UIImage, idImage: UIImage, completion: @escaping (Result<FaceMatchData, Error>) -> Void) {
-    // Simulate face matching
-    DispatchQueue.global(qos: .userInitiated).async {
-      // Simulate processing delay
-      Thread.sleep(forTimeInterval: 1.5)
-      
-      // Create mock face match result with high score
-      let matchData = FaceMatchData(score: 0.92, isMatch: true)
-      
-      DispatchQueue.main.async {
-        completion(.success(matchData))
-      }
-    }
-  }
-}
-
-public class SwiftAcuantFlutterPlugin: NSObject, FlutterPlugin {
-  private var documentCaptureController: DocumentCaptureController?
-  private var faceCaptureController: AcuantFaceCaptureController?
-  private var documentProcessingController: AcuantDocumentProcessingController?
-  private var faceMatchController: AcuantFaceMatchController?
-  private var pendingResult: FlutterResult?
-  
-  public static func register(with registrar: FlutterPluginRegistrar) {
-    let channel = FlutterMethodChannel(name: "acuant_flutter_plugin", binaryMessenger: registrar.messenger())
-    let instance = SwiftAcuantFlutterPlugin()
-    registrar.addMethodCallDelegate(instance, channel: channel)
-  }
-  
-  public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    switch call.method {
-    case "initialize":
-      if let args = call.arguments as? [String: Any],
-         let username = args["username"] as? String,
-         let password = args["password"] as? String,
-         let subscription = args["subscription"] as? String,
-         let endpoints = args["endpoints"] as? [String: String] {
-        initialize(username: username, password: password, subscription: subscription, endpoints: endpoints, result: result)
-      } else {
-        result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid arguments for initialize", details: nil))
-      }
-    case "captureFrontDocument":
-      pendingResult = result
-      captureFrontDocument()
-    case "captureBackDocument":
-      pendingResult = result
-      captureBackDocument()
-    case "captureFace":
-      pendingResult = result
-      captureFace()
-    case "processDocument":
-      if let args = call.arguments as? [String: Any],
-         let frontImagePath = args["frontImagePath"] as? String,
-         let backImagePath = args["backImagePath"] as? String {
-        processDocument(frontImagePath: frontImagePath, backImagePath: backImagePath, result: result)
-      } else {
-        result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid arguments for processDocument", details: nil))
-      }
-    case "matchFaces":
-      if let args = call.arguments as? [String: Any],
-         let faceImagePath = args["faceImagePath"] as? String,
-         let idImagePath = args["idImagePath"] as? String {
-        matchFaces(faceImagePath: faceImagePath, idImagePath: idImagePath, result: result)
-      } else {
-        result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid arguments for matchFaces", details: nil))
-      }
-    case "getSdkVersion":
-      getSdkVersion(result: result)
-    default:
-      result(FlutterMethodNotImplemented)
-    }
-  }
-  
-  private func initialize(username: String, password: String, subscription: String, endpoints: [String: String], result: @escaping FlutterResult) {
-    let credentials = AcuantCredentials(username: username, password: password, subscription: subscription)
-    
-    let endpointsObj = AcuantEndpoints()
-    if let frmEndpoint = endpoints["frm_endpoint"] {
-      endpointsObj.frmEndpoint = frmEndpoint
-    }
-    if let passiveLivenessEndpoint = endpoints["passive_liveness_endpoint"] {
-      endpointsObj.passiveLivenessEndpoint = passiveLivenessEndpoint
-    }
-    if let medEndpoint = endpoints["med_endpoint"] {
-      endpointsObj.medEndpoint = medEndpoint
-    }
-    if let assureidEndpoint = endpoints["assureid_endpoint"] {
-      endpointsObj.assureidEndpoint = assureidEndpoint
-    }
-    if let acasEndpoint = endpoints["acas_endpoint"] {
-      endpointsObj.acasEndpoint = acasEndpoint
-    }
-    if let ozoneEndpoint = endpoints["ozone_endpoint"] {
-      endpointsObj.ozoneEndpoint = ozoneEndpoint
-    }
-    
-    AcuantCommon.initialize(credentials: credentials, endpoints: endpoints) { [weak self] success, error in
-        if success {
-            self?.documentCaptureController = DocumentCaptureController()
-            self?.faceCaptureController = AcuantFaceCaptureController()
-            self?.documentProcessingController = AcuantDocumentProcessingController()
-            self?.faceMatchController = AcuantFaceMatchController()
-            
-            result([
-                "success": true,
-                "message": "Acuant SDK initialized successfully"
-            ])
-        } else {
-            result([
-                "success": false,
-                "message": error?.localizedDescription ?? "Failed to initialize Acuant SDK"
-            ])
-        }
-    }
-  }
-  
-  private func captureFrontDocument() {
-    guard let controller = documentCaptureController else {
-        pendingResult?([
-            "success": false,
-            "message": "Document capture controller not initialized"
-        ])
-        return
-    }
-    
-    controller.captureFrontDocument { [weak self] result in
-        switch result {
-        case .success(let image):
-            // Save image to temporary directory
-            if let imagePath = self?.saveImageToTemporaryDirectory(image) {
-                self?.pendingResult?([
-                    "success": true,
-                    "imagePath": imagePath
-                ])
-            } else {
-                self?.pendingResult?([
-                    "success": false,
-                    "message": "Failed to save captured image"
-                ])
-            }
-        case .failure(let error):
-            self?.pendingResult?([
-                "success": false,
-                "message": error.localizedDescription
-            ])
-        }
-    }
-  }
-  
-  private func captureBackDocument() {
-    guard let controller = documentCaptureController else {
-        pendingResult?([
-            "success": false,
-            "message": "Document capture controller not initialized"
-        ])
-        return
-    }
-    
-    controller.captureBackDocument { [weak self] result in
-        switch result {
-        case .success(let image):
-            // Save image to temporary directory
-            if let imagePath = self?.saveImageToTemporaryDirectory(image) {
-                self?.pendingResult?([
-                    "success": true,
-                    "imagePath": imagePath
-                ])
-            } else {
-                self?.pendingResult?([
-                    "success": false,
-                    "message": "Failed to save captured image"
-                ])
-            }
-        case .failure(let error):
-            self?.pendingResult?([
-                "success": false,
-                "message": error.localizedDescription
-            ])
-        }
-    }
-  }
-  
-  private func captureFace() {
-    guard let controller = faceCaptureController else {
-        pendingResult?([
-            "success": false,
-            "message": "Face capture controller not initialized"
-        ])
-        return
-    }
-    
-    controller.captureFace { [weak self] result in
-        switch result {
-        case .success(let image):
-            // Save image to temporary directory
-            if let imagePath = self?.saveImageToTemporaryDirectory(image) {
-                self?.pendingResult?([
-                    "success": true,
-                    "imagePath": imagePath
-                ])
-            } else {
-                self?.pendingResult?([
-                    "success": false,
-                    "message": "Failed to save captured image"
-                ])
-            }
-        case .failure(let error):
-            self?.pendingResult?([
-                "success": false,
-                "message": error.localizedDescription
-            ])
-        }
-    }
-  }
-  
-  private func processDocument(frontImagePath: String, backImagePath: String, result: @escaping FlutterResult) {
-    guard let controller = documentProcessingController else {
-        result([
-            "success": false,
-            "message": "Document processing controller not initialized"
-        ])
-        return
-    }
-    
-    guard let frontImage = UIImage(contentsOfFile: frontImagePath),
-          let backImage = UIImage(contentsOfFile: backImagePath) else {
-        result([
-            "success": false,
-            "message": "Failed to load document images"
-        ])
-        return
-    }
-    
-    controller.processDocument(frontImage: frontImage, backImage: backImage) { processResult in
-        switch processResult {
-        case .success(let documentData):
-            result([
-                "success": true,
-                "fields": documentData.fields,
-                "authenticationResult": [
-                    "result": documentData.authenticationResult.result,
-                    "score": documentData.authenticationResult.score
-                ]
-            ])
-        case .failure(let error):
-            result([
-                "success": false,
-                "message": error.localizedDescription
-            ])
-        }
-    }
-  }
-  
-  private func matchFaces(faceImagePath: String, idImagePath: String, result: @escaping FlutterResult) {
-    guard let controller = faceMatchController else {
-        result([
-            "success": false,
-            "message": "Face match controller not initialized"
-        ])
-        return
-    }
-    
-    guard let faceImage = UIImage(contentsOfFile: faceImagePath),
-           let idImage = UIImage(contentsOfFile: idImagePath) else {
-        result([
-            "success": false,
-            "message": "Failed to load face images"
-        ])
-        return
-    }
-    
-    controller.matchFaces(faceImage: faceImage, idImage: idImage) { matchResult in
-        switch matchResult {
-        case .success(let matchData):
-            result([
-                "success": true,
-                "score": matchData.score,
-                "isMatch": matchData.isMatch
-            ])
-        case .failure(let error):
-            result([
-                "success": false,
-                "message": error.localizedDescription
-            ])
-        }
-    }
-  }
-  
-  private func getSdkVersion(result: @escaping FlutterResult) {
-    result([
-        "success": true,
-        "sdkVersion": AcuantCommon.version
-    ])
-  }
-  
-  private func saveImageToTemporaryDirectory(_ image: UIImage) -> String? {
-    guard let data = image.jpegData(compressionQuality: 0.8) else {
-        return nil
-    }
-    
-    let tempDir = NSTemporaryDirectory()
-    let fileName = UUID().uuidString + ".jpg"
-    let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(fileName)
-    
-    do {
-        try data.write(to: fileURL)
-        return fileURL.path
-    } catch {
-        print("Error saving image: \(error)")
-        return nil
-    }
+    completionHandler?(.success(image))
+    dismiss(animated: true)
   }
 } 

@@ -30,7 +30,8 @@ flutter_ios_podfile_setup
 target 'Runner' do
   use_frameworks!
 
-  # Removed Acuant SDK dependency since we're using our own implementation
+  # Add local podspec for Acuant SDK
+  pod 'AcuantiOSSDKV11', :path => '../../AcuantiOSSDKV11.podspec'
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   

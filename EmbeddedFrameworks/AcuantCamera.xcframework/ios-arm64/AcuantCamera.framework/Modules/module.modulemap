@@ -1,6 +1,0 @@
-framework module AcuantCamera {
-  umbrella header "AcuantCamera.h"
-  
-  export *
-  module * { export * }
-} 
