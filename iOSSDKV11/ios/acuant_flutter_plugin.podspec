@@ -1,0 +1,1 @@
+s.dependency 'AcuantiOSSDKV11', '11.6.5' 

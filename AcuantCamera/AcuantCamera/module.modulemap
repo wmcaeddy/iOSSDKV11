@@ -1,0 +1,29 @@
+framework module AcuantCamera {
+  umbrella header "AcuantCamera.h"
+  
+  export *
+  module * { export * }
+  
+  explicit module Camera {
+    header "Camera/Document/DocumentCaptureController.swift"
+    header "Camera/Document/Delegate/DocumentCaptureDelegate.swift"
+    header "Camera/Mrz/MrzCaptureController.swift"
+    header "Camera/Barcode/BarcodeCaptureController.swift"
+    export *
+  }
+  
+  explicit module View {
+    header "View/CameraView.swift"
+    export *
+  }
+  
+  explicit module Extension {
+    header "Extension/UIView+Extension.swift"
+    export *
+  }
+  
+  explicit module Constant {
+    header "Constant/AcuantCameraConstants.swift"
+    export *
+  }
+} 

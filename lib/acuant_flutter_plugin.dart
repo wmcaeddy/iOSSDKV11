@@ -81,4 +81,20 @@ class AcuantFlutterPlugin {
       return {'success': false, 'message': e.message};
     }
   }
+
+  /// Match face image with document photo
+  static Future<Map<String, dynamic>> matchFace({
+    required String faceImagePath,
+    required String documentImagePath,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod('matchFace', {
+        'faceImagePath': faceImagePath,
+        'documentImagePath': documentImagePath,
+      });
+      return Map<String, dynamic>.from(result);
+    } on PlatformException catch (e) {
+      return {'success': false, 'message': e.message};
+    }
+  }
 }
