@@ -597,7 +597,7 @@ public class SwiftAcuantFlutterPlugin: NSObject, FlutterPlugin {
             var photoPath: String? = nil
             if let faceImage = result.faceImage {
                 photoPath = self?.saveImageToTemporaryDirectory(faceImage)
-                fields["photoPath"] = photoPath
+                fields["photoPath"] = photoPath ?? ""
                 print("Document face photo saved at: \(photoPath ?? "unknown")")
             }
             
@@ -615,8 +615,8 @@ public class SwiftAcuantFlutterPlugin: NSObject, FlutterPlugin {
             // Return the processed document data
             self?.pendingResult?([
                 "success": true,
-                "fields": fields,
-                "authenticationResult": authResultDict
+                "fields": fields as [String: String],
+                "authenticationResult": authResultDict as [String: Any]
             ])
             
             print("Document processing completed successfully")
@@ -708,21 +708,19 @@ public class SwiftAcuantFlutterPlugin: NSObject, FlutterPlugin {
             return
         }
         
-        print("Step 3: Face matching completed - Score: \(result.score)")
+        print("Face matching completed with score: \(result.score)")
         
-        // Determine if it's a match based on score threshold
-        let isMatch = result.score >= 80 // Using 80 as a threshold, adjust as needed
+        // Determine if the face is a match based on the score threshold
+        let isMatch = result.score >= 80.0 // Using 80% as a threshold for a match
         
-        print("Match determination: \(isMatch ? "MATCH" : "NO MATCH")")
-        
-        // Return face matching result
+        // Return the face matching result
         self?.pendingResult?([
             "success": true,
             "score": result.score,
             "isMatch": isMatch
-        ])
+        ] as [String: Any])
         
-        print("Face matching process completed successfully")
+        print("Face matching completed successfully")
     }
   }
   

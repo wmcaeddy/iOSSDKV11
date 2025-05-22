@@ -594,8 +594,8 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
       
       if (processResult['success'] == true) {
         setState(() {
-          _documentData = processResult['fields'];
-          _authenticationResult = processResult['authenticationResult'];
+          _documentData = Map<String, dynamic>.from(processResult['fields'] as Map);
+          _authenticationResult = Map<String, dynamic>.from(processResult['authenticationResult'] as Map);
         });
         
         _addLog("Document data received: ${_documentData?.keys.join(', ')}");
