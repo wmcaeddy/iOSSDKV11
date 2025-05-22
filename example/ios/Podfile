@@ -32,6 +32,12 @@ target 'Runner' do
 
   # Add local podspec for Acuant SDK
   pod 'AcuantiOSSDKV11', :path => '../../AcuantiOSSDKV11.podspec'
+  
+  # Explicitly include all required Acuant SDK subspecs
+  pod 'AcuantiOSSDKV11/AcuantCommon', :path => '../../AcuantiOSSDKV11.podspec'
+  pod 'AcuantiOSSDKV11/AcuantImagePreparation', :path => '../../AcuantiOSSDKV11.podspec'
+  pod 'AcuantiOSSDKV11/AcuantDocumentProcessing', :path => '../../AcuantiOSSDKV11.podspec'
+  pod 'AcuantiOSSDKV11/AcuantFaceMatch', :path => '../../AcuantiOSSDKV11.podspec'
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   

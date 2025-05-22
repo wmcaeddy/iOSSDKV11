@@ -33,6 +33,31 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _isInitialized = false;
   bool _isLoading = true;
+  bool _isInitializing = false;
+  String? _frontImagePath;
+  String? _backImagePath;
+  String? _faceImagePath;
+  Map<String, dynamic>? _documentData;
+  Map<String, dynamic>? _authenticationResult;
+  double? _faceMatchScore;
+  bool? _isFaceMatched;
+  bool _isProcessing = false;
+  bool _isMatching = false;
+  
+  // Add a list to store logs
+  List<String> _logs = [];
+  bool _showLogs = false;
+  
+  // Method to add logs
+  void _addLog(String log) {
+    setState(() {
+      _logs.add("${DateTime.now().toString().split('.').first}: $log");
+      // Keep only the last 100 logs to prevent memory issues
+      if (_logs.length > 100) {
+        _logs.removeAt(0);
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -71,6 +96,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initializeSDK() async {
+    if (_isInitializing) return;
+    
+    setState(() {
+      _isInitializing = true;
+    });
+    
+    _addLog("Initializing Acuant SDK...");
+    
     try {
       final prefs = await SharedPreferences.getInstance();
       
@@ -89,20 +122,28 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       setState(() {
+        _isInitializing = false;
         _isInitialized = initResult['success'] == true;
       });
-
-      if (!_isInitialized) {
+      
+      _addLog("SDK Initialization result: ${initResult['success'] ? 'Success' : 'Failed'} - ${initResult['message']}");
+      
+      if (initResult['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to initialize Acuant SDK')),
+          SnackBar(content: Text('SDK initialized successfully')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to initialize SDK: ${initResult['message']}')),
         );
       }
     } catch (e) {
       setState(() {
-        _isInitialized = false;
+        _isInitializing = false;
       });
+      _addLog("SDK Initialization error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error initializing Acuant SDK: $e')),
+        SnackBar(content: Text('Error: $e')),
       );
     }
   }
@@ -138,49 +179,92 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
           ),
+          IconButton(
+            icon: Icon(_showLogs ? Icons.visibility_off : Icons.visibility),
+            onPressed: () {
+              setState(() {
+                _showLogs = !_showLogs;
+              });
+            },
+            tooltip: _showLogs ? 'Hide Logs' : 'Show Logs',
+          ),
         ],
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : _isInitialized
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Acuant SDK Initialized',
-                        style: TextStyle(fontSize: 20),
+      body: _showLogs 
+          ? _buildLogsView() 
+          : _isLoading
+              ? Center(child: CircularProgressIndicator())
+              : _isInitialized
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Acuant SDK Initialized',
+                            style: TextStyle(fontSize: 20),
+                          ),
+                          SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) => DocumentVerificationScreen(),
+                                ),
+                              );
+                            },
+                            child: Text('Start Document Verification'),
+                          ),
+                        ],
                       ),
-                      SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => DocumentVerificationScreen(),
-                            ),
-                          );
-                        },
-                        child: Text('Start Document Verification'),
+                    )
+                  : Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Acuant SDK Not Initialized',
+                            style: TextStyle(fontSize: 20),
+                          ),
+                          SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: _openConfiguration,
+                            child: Text('Configure SDK'),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                )
-              : Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Acuant SDK Not Initialized',
-                        style: TextStyle(fontSize: 20),
-                      ),
-                      SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _openConfiguration,
-                        child: Text('Configure SDK'),
-                      ),
-                    ],
-                  ),
+                    ),
+    );
+  }
+
+  Widget _buildLogsView() {
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            itemCount: _logs.length,
+            itemBuilder: (context, index) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                child: Text(
+                  _logs[index],
+                  style: TextStyle(fontSize: 12, fontFamily: 'Courier'),
                 ),
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _logs.clear();
+              });
+            },
+            child: Text('Clear Logs'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -200,6 +284,12 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
   bool? _isFaceMatched;
   bool _isProcessing = false;
   bool _isMatching = false;
+  
+  void _addLog(String log) {
+    if (context.findAncestorStateOfType<_HomeScreenState>() != null) {
+      context.findAncestorStateOfType<_HomeScreenState>()!._addLog(log);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -400,17 +490,23 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
 
   Future<void> _captureFrontOfDocument() async {
     try {
+      _addLog("Starting front document capture...");
       final frontResult = await AcuantFlutterPlugin.captureFrontDocument();
+      _addLog("Front document capture result: ${frontResult['success'] ? 'Success' : 'Failed'}");
+      
       if (frontResult['success'] == true) {
         setState(() {
           _frontImagePath = frontResult['imagePath'];
         });
+        _addLog("Front image saved at: ${frontResult['imagePath']}");
       } else {
+        _addLog("Failed to capture front document: ${frontResult['message']}");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to capture front of document')),
         );
       }
     } catch (e) {
+      _addLog("Front document capture error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
@@ -419,17 +515,23 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
 
   Future<void> _captureBackOfDocument() async {
     try {
+      _addLog("Starting back document capture...");
       final backResult = await AcuantFlutterPlugin.captureBackDocument();
+      _addLog("Back document capture result: ${backResult['success'] ? 'Success' : 'Failed'}");
+      
       if (backResult['success'] == true) {
         setState(() {
           _backImagePath = backResult['imagePath'];
         });
+        _addLog("Back image saved at: ${backResult['imagePath']}");
       } else {
+        _addLog("Failed to capture back document: ${backResult['message']}");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to capture back of document')),
         );
       }
     } catch (e) {
+      _addLog("Back document capture error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
@@ -438,17 +540,23 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
 
   Future<void> _captureFace() async {
     try {
+      _addLog("Starting face capture...");
       final faceResult = await AcuantFlutterPlugin.captureFace();
+      _addLog("Face capture result: ${faceResult['success'] ? 'Success' : 'Failed'}");
+      
       if (faceResult['success'] == true) {
         setState(() {
           _faceImagePath = faceResult['imagePath'];
         });
+        _addLog("Face image saved at: ${faceResult['imagePath']}");
       } else {
+        _addLog("Failed to capture face: ${faceResult['message']}");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to capture face')),
         );
       }
     } catch (e) {
+      _addLog("Face capture error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
@@ -457,6 +565,7 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
 
   Future<void> _processDocument() async {
     if (_frontImagePath == null || _backImagePath == null) {
+      _addLog("Cannot process document: Missing front or back images");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Both front and back images must be captured first')),
       );
@@ -468,6 +577,10 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
         _isProcessing = true;
       });
       
+      _addLog("Starting document processing...");
+      _addLog("Front image: $_frontImagePath");
+      _addLog("Back image: $_backImagePath");
+      
       final processResult = await AcuantFlutterPlugin.processDocument(
         frontImagePath: _frontImagePath!,
         backImagePath: _backImagePath!,
@@ -477,12 +590,18 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
         _isProcessing = false;
       });
       
+      _addLog("Document processing result: ${processResult['success'] ? 'Success' : 'Failed'}");
+      
       if (processResult['success'] == true) {
         setState(() {
           _documentData = processResult['fields'];
           _authenticationResult = processResult['authenticationResult'];
         });
+        
+        _addLog("Document data received: ${_documentData?.keys.join(', ')}");
+        _addLog("Authentication result: ${_authenticationResult?['result']} (Score: ${_authenticationResult?['score']})");
       } else {
+        _addLog("Failed to process document: ${processResult['message']}");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to process document')),
         );
@@ -491,6 +610,7 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
       setState(() {
         _isProcessing = false;
       });
+      _addLog("Document processing error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
@@ -499,6 +619,7 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
 
   Future<void> _performFaceMatch() async {
     if (_faceImagePath == null || _documentData == null) {
+      _addLog("Cannot perform face match: Missing face image or document data");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Face image and document data must be available first')),
       );
@@ -510,21 +631,31 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
         _isMatching = true;
       });
       
+      _addLog("Starting face matching...");
+      _addLog("Face image: $_faceImagePath");
+      _addLog("Document image: ${_documentData?['photoPath'] ?? 'null'}");
+      
       final matchResult = await AcuantFlutterPlugin.matchFace(
         faceImagePath: _faceImagePath!,
-        documentImagePath: _documentData!['photoPath'],
+        documentImagePath: _documentData!['photoPath'] ?? "null",
       );
       
       setState(() {
         _isMatching = false;
       });
       
+      _addLog("Face matching result: ${matchResult['success'] ? 'Success' : 'Failed'}");
+      
       if (matchResult['success'] == true) {
         setState(() {
           _faceMatchScore = matchResult['score'];
           _isFaceMatched = matchResult['isMatch'];
         });
+        
+        _addLog("Face match score: $_faceMatchScore");
+        _addLog("Is face matched: $_isFaceMatched");
       } else {
+        _addLog("Failed to match face: ${matchResult['message']}");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to match face')),
         );
@@ -533,6 +664,7 @@ class _DocumentVerificationScreenState extends State<DocumentVerificationScreen>
       setState(() {
         _isMatching = false;
       });
+      _addLog("Face matching error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
